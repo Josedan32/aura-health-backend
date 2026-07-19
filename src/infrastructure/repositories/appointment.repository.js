@@ -48,7 +48,7 @@ class PrismaAppointmentRepository extends AppointmentRepository {
     return this._mapRow(row);
   }
 
-  async findAll({ page = 1, limit = 20, doctorId, patientId, date, status } = {}) {
+  async findAll({ page = 1, limit = 20, doctorId, patientId, date, dateFrom, dateTo, status } = {}) {
     const skip = (page - 1) * limit;
 
     const where = {
@@ -56,6 +56,12 @@ class PrismaAppointmentRepository extends AppointmentRepository {
       ...(patientId && { patient_id: patientId }),
       ...(status && { status }),
       ...(date && { date: new Date(date) }),
+      ...(!date && (dateFrom || dateTo) && {
+        date: {
+          ...(dateFrom && { gte: new Date(dateFrom) }),
+          ...(dateTo && { lte: new Date(dateTo) }),
+        },
+      }),
     };
 
     const [rows, total] = await Promise.all([
@@ -79,6 +85,27 @@ class PrismaAppointmentRepository extends AppointmentRepository {
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  async countDistinctPatients({ doctorId, patientId, dateFrom, dateTo } = {}) {
+    const where = {
+      ...(doctorId && { doctor_id: doctorId }),
+      ...(patientId && { patient_id: patientId }),
+      ...((dateFrom || dateTo) && {
+        date: {
+          ...(dateFrom && { gte: new Date(dateFrom) }),
+          ...(dateTo && { lte: new Date(dateTo) }),
+        },
+      }),
+    };
+
+    const rows = await prisma.appointments.findMany({
+      where,
+      distinct: ['patient_id'],
+      select: { patient_id: true },
+    });
+
+    return rows.length;
   }
 
   async findConflict({ doctorId, date, startTime, endTime, excludeId = null }) {
@@ -148,7 +175,7 @@ class PrismaAppointmentRepository extends AppointmentRepository {
     const newDateObj = new Date(newDate);
     const newStartDT = this._toDateTime(newDate, newStartTime);
     const newEndDT = this._toDateTime(newDate, newEndTime);
- 
+
     try {
       const row = await prisma.$transaction(async (tx) => {
         const updated = await tx.appointments.update({
@@ -163,7 +190,7 @@ class PrismaAppointmentRepository extends AppointmentRepository {
             patients: { select: { id: true, name: true, document_number: true, email: true } },
           },
         });
- 
+
         const historyAction = [
           'RESCHEDULED',
           `from:${previousDate}T${previousStartTime}-${previousEndTime}`,
@@ -172,7 +199,7 @@ class PrismaAppointmentRepository extends AppointmentRepository {
         ]
           .filter(Boolean)
           .join('|');
- 
+
         await tx.appointment_history.create({
           data: {
             appointment_id: appointmentId,
@@ -180,10 +207,10 @@ class PrismaAppointmentRepository extends AppointmentRepository {
             performed_by: performedBy ?? null,
           },
         });
- 
+
         return updated;
       });
- 
+
       return this._mapRow(row);
     } catch (err) {
       if (err?.code === 'P2002') {
@@ -284,6 +311,120 @@ class PrismaAppointmentRepository extends AppointmentRepository {
     });
 
     return this._mapRow(row);
+  }
+
+  async markAsCompleted(id, notes, performedBy) {
+    const notesValue = notes
+      ? `COMPLETION_NOTES: ${notes}`
+      : null;
+
+    const row = await prisma.appointments.update({
+      where: { id },
+      data: {
+        status: 'COMPLETED',
+        ...(notesValue && { notes: notesValue }),
+      },
+      include: {
+        doctors: {
+          select: {
+            id: true,
+            name: true,
+            specialization: true,
+          },
+        },
+        patients: {
+          select: {
+            id: true,
+            name: true,
+            document_number: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    await prisma.appointment_history.create({
+      data: {
+        appointment_id: id,
+        action: notes
+          ? `COMPLETED — ${notes}`
+          : 'COMPLETED',
+        performed_by: performedBy ?? null,
+      },
+    });
+
+    return this._mapRow(row);
+  }
+
+  async findAppointmentsForReminder(startWindow, endWindow) {
+
+    const startTime =
+      startWindow.toTimeString().split(' ')[0];
+
+    const endTime =
+      endWindow.toTimeString().split(' ')[0];
+
+    return prisma.appointments.findMany({
+      where: {
+        status: 'SCHEDULED',
+
+        date: {
+          equals: new Date(
+            new Date().toISOString().split('T')[0]
+          ),
+        },
+
+        start_time: {
+          gte: new Date(`1970-01-01T${startTime}`),
+
+          lte: new Date(`1970-01-01T${endTime}`),
+        },
+      },
+
+      include: {
+        patients: true,
+        doctors: true,
+      },
+    });
+  }
+
+  async findDailyAgendaByDate(date) {
+    return prisma.appointments.findMany({
+      where: {
+        status: 'SCHEDULED',
+
+        date: {
+          equals: new Date(date),
+        },
+      },
+
+      include: {
+        patients: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+
+        doctors: {
+          include: {
+            users: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+
+      orderBy: [
+        {
+          start_time: 'asc',
+        },
+      ],
+    });
   }
 }
 

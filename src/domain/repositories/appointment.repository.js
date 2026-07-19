@@ -22,6 +22,18 @@ class AppointmentRepository {
   async markAsNoShow(id, reason, performedBy) {
     throw new Error('Method not implemented');
   }
+
+  async markAsCompleted(id, notes, performedBy) {
+    throw new Error('Method not implemented');
+  }
+
+  async findAppointmentsForReminder(startDate, endDate) {
+    throw new Error('Method not implemented');
+  }
+
+  async countDistinctPatients(options = {}) {
+    throw new Error('Method not implemented');
+  }
 }
 
 export default AppointmentRepository;

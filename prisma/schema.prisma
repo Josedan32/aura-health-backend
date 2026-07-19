@@ -68,11 +68,16 @@ model medical_records {
   patient_id           String                      @db.Uuid
   uploaded_by          String?                     @db.Uuid
   file_url             String
+  file_name            String?
   file_hash            String?
   source               medical_record_source_enum?
+  document_type        document_type_enum?
+  validated_by         String?                     @db.Uuid
+  validated_at         DateTime?                   @db.Timestamp(6)
   created_at           DateTime?                   @default(now()) @db.Timestamp(6)
   patients             patients                    @relation(fields: [patient_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users                users?                      @relation(fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                users?                      @relation("MedicalRecordUploadedBy", fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  validator            users?                      @relation("MedicalRecordValidatedBy", fields: [validated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   risk_classifications risk_classifications?
 
   @@index([patient_id], map: "idx_medical_record_patient")
@@ -98,7 +103,13 @@ model notifications {
   entity_type String?
   entity_id   String?                   @db.Uuid
   sent_at     DateTime?                 @db.Timestamp(6)
+  read_at     DateTime?                 @db.Timestamp(6)
+  created_at  DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at  DateTime?                 @default(now()) @db.Timestamp(6)
   users       users                     @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([entity_type, entity_id])
+  @@index([user_id, created_at])
 }
 
 model patients {
@@ -171,10 +182,6 @@ model treatments {
   patients            patients               @relation(fields: [patient_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   approved_user       users?                 @relation("TreatmentApprovedBy", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  approved_user users? @relation("TreatmentApprovedBy", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  approved_user users? @relation("TreatmentApprovedBy", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
   @@index([patient_id], map: "idx_treatment_patient")
 }
 
@@ -201,6 +208,7 @@ model users {
   id                   String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   email                String                @unique
   password             String
+  name                 String?
   role_id              String                @db.Uuid
   is_active            Boolean?              @default(true)
   must_change_password Boolean?              @default(false)
@@ -211,7 +219,8 @@ model users {
   audit_logs           audit_logs[]
   doctors              doctors?              @relation("DoctorUser")
   doctors_changed      doctors[]             @relation("DoctorStatusChanger")
-  medical_records      medical_records[]
+  medical_records      medical_records[]     @relation("MedicalRecordUploadedBy")
+  validated_records    medical_records[]     @relation("MedicalRecordValidatedBy")
   medication_changes   medication_changes[]
   notifications        notifications[]
   reports              reports[]
@@ -233,6 +242,12 @@ enum medical_record_source_enum {
   EXTERNAL
 }
 
+enum document_type_enum {
+  HISTORIA_CLINICA
+  EXAMEN
+  DIAGNOSTICO
+}
+
 enum notification_status_enum {
   PENDING
   SENT
@@ -246,6 +261,7 @@ enum notification_type_enum {
 
 enum report_type_enum {
   CLINICAL
+  CONSOLIDATED
 }
 
 enum risk_level_enum {
