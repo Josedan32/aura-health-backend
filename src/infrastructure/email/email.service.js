@@ -14,7 +14,32 @@ class EmailService {
   async _getTransport() {
     if (this._transport) return this._transport;
 
-    if (env.smtp.host) {
+    // Render (and several other free-tier hosts) block outbound SMTP ports,
+    // so nodemailer's SMTP transport just hangs until ETIMEDOUT there. When
+    // using Resend's SMTP relay (host smtp.resend.com, user "resend", pass =
+    // Resend API key), send over Resend's HTTPS API instead — same
+    // credentials, no blocked port.
+    if (env.smtp.host === 'smtp.resend.com') {
+      this._transport = {
+        sendMail: async ({ from, to, subject, text, html }) => {
+          const response = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${env.smtp.auth.pass}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ from, to, subject, text, html }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data?.message ?? `Resend API error (${response.status})`);
+          }
+
+          return { messageId: data.id };
+        },
+      };
+    } else if (env.smtp.host) {
       this._transport = nodemailer.createTransport({
         host: env.smtp.host,
         port: Number(env.smtp.port ?? 587),
