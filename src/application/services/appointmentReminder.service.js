@@ -23,9 +23,12 @@ class AppointmentReminderService {
   async sendUpcomingReminders() {
     const now = new Date();
 
-    const startWindow = new Date(now.getTime() + 4 * 60 * 1000);
+    // Matches the hourly cron cadence (runs at minute 0 of every hour): catch
+    // anything starting in the upcoming hour so every appointment gets a
+    // reminder once, rather than only ones landing in a narrow minute band.
+    const startWindow = now;
 
-    const endWindow = new Date(now.getTime() + 6 * 60 * 1000);
+    const endWindow = new Date(now.getTime() + 60 * 60 * 1000);
 
     const appointments =
       await appointmentRepository.findAppointmentsForReminder(
